@@ -1,0 +1,46 @@
+services:
+  # ────────────────────────────
+  # PHP-FPM (Laravel application)
+  # ────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile          # your php:8.2-fpm image
+    expose:                           # expose FastCGI port only to other containers
+      - "9000"
+    depends_on:
+      - mysql
+
+  # ────────────────────────────
+  # Queue / Horizon worker
+  # ────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.queue-worker
+    depends_on:
+      - mysql
+
+  # ────────────────────────────
+  # Nginx reverse proxy
+  # ────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "8000:80"                     # host:container
+    volumes:
+      - .:/var/www
+      - ./default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+
+  # ────────────────────────────
+  # MySQL
+  # ────────────────────────────
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: laravel
+    ports:
+      - "3306:3306"

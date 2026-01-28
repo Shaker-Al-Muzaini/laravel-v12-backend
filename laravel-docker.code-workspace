@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../laravel-gitops-k8s"
+		}
+	],
+	"settings": {}
+}

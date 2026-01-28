@@ -1,0 +1,104 @@
+name: Build and Push to ECR
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      tag_suffix:
+        description: 'Additional tag suffix (optional)'
+        required: false
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: laravel-app-k8s
+
+jobs:
+  build-push-update:
+    name: Build, Push and Update GitOps
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Generate image tag
+        id: tag
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          
+          if [ -n "${{ github.event.inputs.tag_suffix }}" ]; then
+            TAG="${TIMESTAMP}-${SHORT_SHA}-${{ github.event.inputs.tag_suffix }}"
+          else
+            TAG="${TIMESTAMP}-${SHORT_SHA}"
+          fi
+          
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "📦 Generated tag: ${TAG}"
+
+      - name: Build Docker image
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          
+          echo "🏗️  Building image: ${FULL_IMAGE}"
+          docker build -t ${FULL_IMAGE} .
+          docker tag ${FULL_IMAGE} ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+          
+          echo "image=${FULL_IMAGE}" >> $GITHUB_OUTPUT
+
+      - name: Push to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          echo "📤 Pushing to ECR..."
+          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+          docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+          
+          echo "✅ Pushed: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "✅ Pushed: ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+
+      - name: Trigger GitOps Update
+        env:
+          FULL_IMAGE: ${{ steps.build.outputs.image }}
+          GITOPS_TOKEN: ${{ secrets.GITOPS_REPO_TOKEN }}
+        run: |
+          echo "🔄 Triggering GitOps repository update..."
+          
+          curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${GITOPS_TOKEN}" \
+            https://api.github.com/repos/${{ github.repository_owner }}/laravel-app-dev/dispatches \
+            -d "{\"event_type\":\"laravel-docker-updated\",\"client_payload\":{\"image\":\"${FULL_IMAGE}\"}}"
+          
+          echo "✅ GitOps update triggered"
+
+      - name: Summary
+        run: |
+          echo "## Deployment Summary 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ steps.build.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: \`${{ steps.tag.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry**: \`${{ steps.login-ecr.outputs.registry }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: \`${{ env.ECR_REPOSITORY }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ GitOps repository will automatically update deployment manifests" >> $GITHUB_STEP_SUMMARY
+          echo "🔄 ArgoCD will sync changes to Kubernetes cluster" >> $GITHUB_STEP_SUMMARY
