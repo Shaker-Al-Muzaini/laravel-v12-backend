@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Test;
 use Illuminate\Support\Facades\Http;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Carbon\Carbon;
 
 class TestController extends Controller
 {
@@ -12,24 +13,42 @@ class TestController extends Controller
      */
     public function index()
     {
-         // 1) API جلب حكمة عشوائية
-        $quoteRes = Http::get("https://zenquotes.io/api/random");
-        $quote = $quoteRes->json()[0] ?? null;
+       
+        // 1) حكمة عربية
+        $quoteRes = Http::get("https://api.adviceslip.com/advice");
+        $quoteData = json_decode($quoteRes->body(), true);
+        $quote = $quoteData['slip']['advice'] ?? "لا توجد حكمة الآن";
 
-        // 2) API أسعار العملات مقابل الشيكل
-        // USD + EUR + EGP
-        $currencyRes = Http::get("https://api.exchangerate.host/latest?base=ILS");
-        $rates = $currencyRes->json()['rates'] ?? [];
+        // 2) أسعار العملات مقابل الشيكل
+        $cur = Http::get("https://open.er-api.com/v6/latest/ILS")->json();
 
-        // 3) API مواقيت الصلاة غزة فلسطين
+        $usd = $cur['rates']['USD'] ?? 0;
+        $eur = $cur['rates']['EUR'] ?? 0;
+        $egp = $cur['rates']['EGP'] ?? 0;
+
+        // 3) مواقيت الصلاة غزة + تحويل 12 ساعة + العربي
         $prayerRes = Http::get("https://api.aladhan.com/v1/timingsByCity", [
             "city" => "Gaza",
             "country" => "Palestine",
             "method" => 4
         ]);
-        $prayer = $prayerRes->json()['data']['timings'] ?? [];
 
-         return view('test', compact('quote', 'rates', 'prayer'));
+        $t = $prayerRes->json()['data']['timings'];
+
+        // تحويل وقت لصيغة 12 AM/PM
+        function to12($time) {
+            return Carbon::createFromFormat('H:i', $time)->format('h:i A');
+        }
+
+        $prayer = [
+            "الفجر"   => to12($t['Fajr']),
+            "الظهر"   => to12($t['Dhuhr']),
+            "العصر"   => to12($t['Asr']),
+            "المغرب"  => to12($t['Maghrib']),
+            "العشاء"  => to12($t['Isha']),
+        ];
+
+        return view('test', compact('quote', 'usd', 'eur', 'egp', 'prayer'));   
 
     }
 
