@@ -1,13 +1,15 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Test\TestController;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
 
-Route::get('test', App\Http\Controllers\Test\TestController::class,"index");
+
+Route::get('test', [TestController::class, 'index']);
 
 // Include health check routes
 require __DIR__.'/health.php';
